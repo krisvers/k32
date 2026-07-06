@@ -64,6 +64,112 @@ enum class CPUInstructionID : uint32_t {
     FTYPE = 0x1f,
 };
 
+inline std::ostream& operator<<(std::ostream& os, CPUInstructionID id) {
+    switch (id) {
+        case CPUInstructionID::LI:
+            os << "li";
+            break;
+        case CPUInstructionID::LMR:
+            os << "lmr";
+            break;
+        case CPUInstructionID::LMIP:
+            os << "lmip";
+            break;
+        case CPUInstructionID::SMR:
+            os << "smr";
+            break;
+        case CPUInstructionID::SMIP:
+            os << "smip";
+            break;
+        case CPUInstructionID::ADD4:
+            os << "add4";
+            break;
+        case CPUInstructionID::UADD:
+            os << "uadd";
+            break;
+        case CPUInstructionID::SUB3:
+            os << "sub3";
+            break;
+        case CPUInstructionID::USUB:
+            os << "usub";
+            break;
+        case CPUInstructionID::MUL4:
+            os << "mul4";
+            break;
+        case CPUInstructionID::UMUL:
+            os << "umul";
+            break;
+        case CPUInstructionID::DIV4:
+            os << "div4";
+            break;
+        case CPUInstructionID::UDIV:
+            os << "udiv";
+            break;
+        case CPUInstructionID::AND4:
+            os << "and4";
+            break;
+        case CPUInstructionID::AND:
+            os << "and";
+            break;
+        case CPUInstructionID::OR4:
+            os << "or4";
+            break;
+        case CPUInstructionID::OR:
+            os << "or";
+            break;
+        case CPUInstructionID::XOR4:
+            os << "xor4";
+            break;
+        case CPUInstructionID::XOR:
+            os << "xor";
+            break;
+        case CPUInstructionID::SH4:
+            os << "sh4";
+            break;
+        case CPUInstructionID::SH:
+            os << "sh";
+            break;
+        case CPUInstructionID::JR:
+            os << "jr";
+            break;
+        case CPUInstructionID::JIP:
+            os << "jip";
+            break;
+        case CPUInstructionID::SPI:
+            os << "spi";
+            break;
+        case CPUInstructionID::FI:
+            os << "fi";
+            break;
+        case CPUInstructionID::FAS:
+            os << "fas";
+            break;
+        case CPUInstructionID::FMUL:
+            os << "fmul";
+            break;
+        case CPUInstructionID::FDIV:
+            os << "fdiv";
+            break;
+        case CPUInstructionID::FSQRT:
+            os << "fsqrt";
+            break;
+        case CPUInstructionID::FLOG:
+            os << "flog";
+            break;
+        case CPUInstructionID::FPOW:
+            os << "fpow";
+            break;
+        case CPUInstructionID::FTYPE:
+            os << "ftype";
+            break;
+        default:
+            os << "unknown";
+            break;
+    }
+
+    return os;
+}
+
 enum class CPUConditionID : uint32_t {
     IFZ = 0x0,
     IFNZ = 0x1,
@@ -103,6 +209,63 @@ enum class CPUConditionID : uint32_t {
     ALWAYS = 0xf,
 };
 
+inline std::ostream& operator<<(std::ostream& os, CPUConditionID id) {
+    switch (id) {
+        case CPUConditionID::IFZ:
+            os << "ifz";
+            break;
+        case CPUConditionID::IFNZ:
+            os << "ifnz";
+            break;
+        case CPUConditionID::IFC:
+            os << "ifc";
+            break;
+        case CPUConditionID::IFNC:
+            os << "ifnc";
+            break;
+        case CPUConditionID::IFUG:
+            os << "ifug";
+            break;
+        case CPUConditionID::IFUNG:
+            os << "ifung";
+            break;
+        case CPUConditionID::IFO:
+            os << "ifo";
+            break;
+        case CPUConditionID::IFNO:
+            os << "ifno";
+            break;
+        case CPUConditionID::IFS:
+            os << "ifs";
+            break;
+        case CPUConditionID::IFNS:
+            os << "ifns";
+            break;
+        case CPUConditionID::IFSYS:
+            os << "ifsys";
+            break;
+        case CPUConditionID::IFL:
+            os << "ifl";
+            break;
+        case CPUConditionID::IFNL:
+            os << "ifnl";
+            break;
+        case CPUConditionID::IFG:
+            os << "ifg";
+            break;
+        case CPUConditionID::IFNG:
+            os << "ifng";
+            break;
+        case CPUConditionID::ALWAYS:
+            break;
+        default:
+            os << "unknown";
+            break;
+    }
+
+    return os;
+}
+
 enum class CPUInterruptID : uint32_t {
     None = 0,
     DivideByZero = 1,
@@ -125,15 +288,28 @@ public:
     }
 };
 
+enum class CPUInstructionImmediateType : uint32_t {
+    None = 0x00,
+    Unsigned8 = 0x01,
+    Unsigned12 = 0x02,
+    Unsigned16 = 0x03,
+    Unsigned20 = 0x04,
+    Signed8 = 0x05,
+    Signed12 = 0x06,
+    Signed16 = 0x07,
+    Signed20 = 0x08,
+};
+
 class CPUInstructionInfo {
 private:
-    CPUInstructionID _opcode;
-    CPUConditionID _condition;
-    std::vector<CPURegisterID> _integerRegisterIDs;
-    std::vector<CPURegisterID> _floatRegisterIDs;
-    std::vector<CPURegisterID> _specialRegisterIDs;
-    uint32_t _immediateValue;
-    uint32_t _flags;
+    CPUInstructionID _opcode = {};
+    CPUConditionID _condition = {};
+    std::vector<CPURegisterID> _integerRegisterIDs = {};
+    std::vector<CPURegisterID> _floatRegisterIDs = {};
+    std::vector<CPURegisterID> _specialRegisterIDs = {};
+    uint32_t _immediateValue = {};
+    uint32_t _flags = {};
+    CPUInstructionImmediateType _immediateType = CPUInstructionImmediateType::None;
 
 public:
     CPUInstructionInfo(CPUInstructionWord word) {
@@ -158,9 +334,6 @@ public:
                 _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 24) & 0x1f));
                 break;
 
-            case CPUInstructionID::UADD:
-                /* A.3r.1imm8 */
-                _immediateValue = (word >> 24) & 0xff;
             case CPUInstructionID::SUB3:
                 /* A.3r.X */
                 _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
@@ -176,6 +349,7 @@ public:
                 _flags = (word >> 19) & 0x01;
             case CPUInstructionID::LMR:
             case CPUInstructionID::SMR:
+            case CPUInstructionID::UADD:
             case CPUInstructionID::USUB:
             case CPUInstructionID::UMUL:
             case CPUInstructionID::UDIV:
@@ -184,6 +358,12 @@ public:
                 _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x1f));
 
                 _immediateValue = (word >> 20) & 0xfff;
+                if (_opcode == CPUInstructionID::LMR || _opcode == CPUInstructionID::SMR) {
+                    _immediateType = CPUInstructionImmediateType::Signed12;
+                } else {
+                    _immediateType = CPUInstructionImmediateType::Unsigned12;
+                }
+
                 break;
 
             case CPUInstructionID::LI:
@@ -194,6 +374,12 @@ public:
                 _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
 
                 _immediateValue = (word >> 16) & 0xffff;
+                if (_opcode == CPUInstructionID::LI) {
+                    _immediateType = CPUInstructionImmediateType::Unsigned16;
+                } else {
+                    _immediateType = CPUInstructionImmediateType::Signed16;
+                }
+
                 break;
 
             case CPUInstructionID::SPI:
@@ -206,6 +392,7 @@ public:
 
             case CPUInstructionID::JIP:
                 _immediateValue = (word >> 12) & 0xfffff;
+                _immediateType = CPUInstructionImmediateType::Signed20;
                 break;
 
             case CPUInstructionID::FI:
@@ -304,7 +491,7 @@ public:
 
     int32_t signed8() const {
         if ((_immediateValue & 0x80) != 0) {
-            return -(((~_immediateValue) & 0xff) - 1);
+            return -static_cast<int32_t>(((~_immediateValue) & 0xff) - 1);
         }
 
         return _immediateValue;
@@ -312,7 +499,7 @@ public:
 
     int32_t signed12() const {
         if ((_immediateValue & 0x800) != 0) {
-            return -(((~_immediateValue) & 0xfff) - 1);
+            return -static_cast<int32_t>(((~_immediateValue) & 0xfff) - 1);
         }
 
         return _immediateValue;
@@ -320,7 +507,7 @@ public:
 
     int32_t signed16() const {
         if ((_immediateValue & 0x8000) != 0) {
-            return -(((~_immediateValue) & 0xffff) - 1);
+            return -static_cast<int32_t>(((~_immediateValue) & 0xffff) - 1);
         }
 
         return _immediateValue;
@@ -328,7 +515,7 @@ public:
 
     int32_t signed20() const {
         if ((_immediateValue & 0x80000) != 0) {
-            return -(((~_immediateValue) & 0xfffff) - 1);
+            return -static_cast<int32_t>(((~_immediateValue) & 0xfffff) - 1);
         }
 
         return _immediateValue;
@@ -337,7 +524,57 @@ public:
     uint32_t flags() const {
         return _flags;
     }
+
+    friend std::ostream& operator<<(std::ostream& os, CPUInstructionInfo const& instruction);
 };
+
+inline std::ostream& operator<<(std::ostream& os, CPUInstructionInfo const& instruction) {
+    os << instruction._condition << " " << instruction._opcode << " ";
+    for (CPURegisterID rid : instruction._integerRegisterIDs) {
+        os << "r" << std::dec << rid << ", ";
+    }
+
+    for (CPURegisterID fid : instruction._floatRegisterIDs) {
+        os << "f" << std::dec << fid << ", ";
+    }
+
+    for (CPURegisterID spid : instruction._specialRegisterIDs) {
+        os << "sp" << std::dec << spid << ", ";
+    }
+
+    switch (instruction._immediateType) {
+        case CPUInstructionImmediateType::Unsigned8:
+            os << std::hex << instruction.unsigned8();
+            break;
+        case CPUInstructionImmediateType::Unsigned12:
+            os << std::hex << instruction.unsigned12();
+            break;
+        case CPUInstructionImmediateType::Unsigned16:
+            os << std::hex << instruction.unsigned16();
+            break;
+        case CPUInstructionImmediateType::Unsigned20:
+            os << std::hex << instruction.unsigned20();
+            break;
+        case CPUInstructionImmediateType::Signed8:
+            os << std::hex << ((instruction.signed8() >= 0) ? "+" : "") << instruction.signed8();
+            break;
+        case CPUInstructionImmediateType::Signed12:
+            os << std::hex << ((instruction.signed12() >= 0) ? "+" : "") << instruction.signed12();
+            break;
+        case CPUInstructionImmediateType::Signed16:
+            os << std::hex << ((instruction.signed16() >= 0) ? "+" : "") << instruction.signed16();
+            break;
+        case CPUInstructionImmediateType::Signed20:
+            os << std::hex << ((instruction.signed20() >= 0) ? "+" : "") << instruction.signed20();
+            break;
+        case CPUInstructionImmediateType::None:
+        default:
+            break;
+    }
+
+    os << "; flags: " << std::hex << instruction._flags;
+    return os;
+}
 
 template<typename T>
 class CPURegister {
@@ -470,6 +707,16 @@ struct CPUStatus {
         }
     }
 };
+
+inline std::ostream& operator<<(std::ostream& os, CPUStatus const& status) {
+    os << (status.zero ? 'Z' : '_')
+        << (status.carry ? 'C' : '_')
+        << (status.overflow ? 'O' : '_')
+        << (status.sign ? 'S' : '_')
+        << (status.system ? 'Y' : '_')
+        << (status.interrupt ? 'I' : '_');
+    return os;
+}
 
 class CPURegisters {
 private:
@@ -687,7 +934,48 @@ public:
         _status = status;
         updateAccessPermissions();
     }
+
+    friend std::ostream& operator<<(std::ostream& os, CPURegisters registers);
 };
+
+inline std::ostream& operator<<(std::ostream& os, CPURegisters registers) {
+    os << std::hex <<
+        "r0: " << registers._r[0] << "\t" <<
+        "r1: " << registers._r[1] << "\t" <<
+        "r2: " << registers._r[2] << "\t" <<
+        "r3: " << registers._r[3] << "\t" <<
+        "r4: " << registers._r[4] << "\t" <<
+        "r5: " << registers._r[5] << "\t" <<
+        "r6: " << registers._r[6] << "\t" <<
+        "r7: " << registers._r[7] << "\t" << std::endl <<
+        "r8: " << registers._r[8] << "\t" <<
+        "r9: " << registers._r[9] << "\t" <<
+        "r10: " << registers._r[10] << "\t" <<
+        "r11: " << registers._r[11] << "\t" <<
+        "r12: " << registers._r[12] << "\t" <<
+        "r13: " << registers._r[13] << "\t" <<
+        "r14: " << registers._r[14] << "\t" <<
+        "r15: " << registers._r[15] << "\t" << std::endl <<
+        "r16: " << registers._r[16] << "\t" <<
+        "r17: " << registers._r[17] << "\t" <<
+        "r18: " << registers._r[18] << "\t" <<
+        "r19: " << registers._r[19] << "\t" <<
+        "r20: " << registers._r[20] << "\t" <<
+        "r21: " << registers._r[21] << "\t" <<
+        "r22: " << registers._r[22] << "\t" <<
+        "r23: " << registers._r[23] << "\t" << std::endl <<
+        "r24: " << registers._r[24] << "\t" <<
+        "r25: " << registers._r[25] << "\t" <<
+        "r26: " << registers._r[26] << "\t" <<
+        "r27: " << registers._r[27] << "\t" <<
+        "r28: " << registers._r[28] << "\t" <<
+        "r29: " << registers._r[29] << "\t" <<
+        "r30: " << registers._r[30] << "\t" <<
+        "r31: " << registers._r[31] << "\t" << std::endl <<
+        "ip: " << registers._ip << std::endl <<
+        "status: " << registers._status;
+    return os;
+}
 
 class CPU : public IDevice {
 private:
@@ -731,50 +1019,21 @@ public:
     }
 
     bool execute() override {
-        std::cout <<
-            "r0 " << _registers.r(0) << " " <<
-            "r1 " << _registers.r(1) << " " <<
-            "r2 " << _registers.r(2) << " " <<
-            "r3 " << _registers.r(3) << std::endl <<
-            "r4 " << _registers.r(4) << " " <<
-            "r5 " << _registers.r(5) << " " <<
-            "r6 " << _registers.r(6) << " " <<
-            "r7 " << _registers.r(7) << std::endl <<
-            "r8 " << _registers.r(8) << " " <<
-            "r9 " << _registers.r(9) << " " <<
-            "r10 " << _registers.r(10) << " " <<
-            "r11 " << _registers.r(11) << std::endl <<
-            "r12 " << _registers.r(12) << " " <<
-            "r13 " << _registers.r(13) << " " <<
-            "r14 " << _registers.r(14) << " " <<
-            "r15 " << _registers.r(15) << std::endl <<
-            "r16 " << _registers.r(16) << " " <<
-            "r17 " << _registers.r(17) << " " <<
-            "r18 " << _registers.r(18) << " " <<
-            "r19 " << _registers.r(19) << std::endl <<
-            "r20 " << _registers.r(20) << " " <<
-            "r21 " << _registers.r(21) << " " <<
-            "r22 " << _registers.r(22) << " " <<
-            "r23 " << _registers.r(23) << std::endl <<
-            "r24 " << _registers.r(24) << " " <<
-            "r25 " << _registers.r(25) << " " <<
-            "r26 " << _registers.r(26) << " " <<
-            "r27 " << _registers.r(27) << std::endl <<
-            "r28 " << _registers.r(28) << " " <<
-            "r29 " << _registers.r(29) << " " <<
-            "r30 " << _registers.r(30) << " " <<
-            "r31 " << _registers.r(31) << std::endl <<
-            "ip " << _registers.ip() << std::endl;
+        std::cout << _registers << std::endl;
+
+        CPUStatus status = _registers.status();
 
         CPUInstructionWord instructionWord = _mmu.word(_registers.ip());
-
         CPUInstructionInfo instructionInfo = CPUInstructionInfo(instructionWord);
+
+        std::cout << "instruction: " << std::hex << instructionWord << ": " << instructionInfo << std::endl << std::endl;
+
         if (!_registers.status().condition(instructionInfo.condition())) {
             _registers.ip() += 4;
             return true;
         }
 
-        CPUStatus status = _registers.status();
+        bool progressIP = true;
         switch (instructionInfo.opcode()) {
             case CPUInstructionID::LI:
                 _registers.r(instructionInfo.rid(0),
@@ -1112,9 +1371,11 @@ public:
                 break;
             }
             case CPUInstructionID::JR:
+                progressIP = false;
                 _registers.ip() = _registers.r(instructionInfo.rid(0)) + instructionInfo.signed16();
                 break;
             case CPUInstructionID::JIP:
+                progressIP = false;
                 _registers.ip() += instructionInfo.signed20();
                 break;
             case CPUInstructionID::SPI: {
@@ -1162,7 +1423,10 @@ public:
             _registers.status(status);
         }
 
-        _registers.ip() += 4;
+        if (progressIP) {
+            _registers.ip() += 4;
+        }
+
         return true;
     }
 

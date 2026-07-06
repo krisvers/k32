@@ -79,6 +79,7 @@
 - special registers are 4-bit
 - immediate8 values are 8-bit (also unsigned8/signed8)
 - immediate12 values are 12-bit (also unsigned12/signed12)
+- immediate16 values are 16-bit (also unsigned16/signed16)
 - immediate20 values are 20-bit (also unsigned20/signed20)
 - flag1 values are 1-bit
 - flag2 values are 2-bit
