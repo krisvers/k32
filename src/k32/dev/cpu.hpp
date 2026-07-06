@@ -542,6 +542,24 @@ inline std::ostream& operator<<(std::ostream& os, CPUInstructionInfo const& inst
         os << "sp" << std::dec << spid << ", ";
     }
 
+    int32_t signedImmediate = 0;
+    switch (instruction._immediateType) {
+        case CPUInstructionImmediateType::Signed8:
+            signedImmediate = instruction.signed8();
+            break;
+        case CPUInstructionImmediateType::Signed12:
+            signedImmediate = instruction.signed12();
+            break;
+        case CPUInstructionImmediateType::Signed16:
+            signedImmediate = instruction.signed16();
+            break;
+        case CPUInstructionImmediateType::Signed20:
+            signedImmediate = instruction.signed20();
+            break;
+        default:
+            break;
+    }
+
     switch (instruction._immediateType) {
         case CPUInstructionImmediateType::Unsigned8:
             os << std::hex << instruction.unsigned8();
@@ -556,16 +574,14 @@ inline std::ostream& operator<<(std::ostream& os, CPUInstructionInfo const& inst
             os << std::hex << instruction.unsigned20();
             break;
         case CPUInstructionImmediateType::Signed8:
-            os << std::hex << ((instruction.signed8() >= 0) ? "+" : "") << instruction.signed8();
-            break;
         case CPUInstructionImmediateType::Signed12:
-            os << std::hex << ((instruction.signed12() >= 0) ? "+" : "") << instruction.signed12();
-            break;
         case CPUInstructionImmediateType::Signed16:
-            os << std::hex << ((instruction.signed16() >= 0) ? "+" : "") << instruction.signed16();
-            break;
         case CPUInstructionImmediateType::Signed20:
-            os << std::hex << ((instruction.signed20() >= 0) ? "+" : "") << instruction.signed20();
+            if (signedImmediate < 0) {
+                os << std::hex << "-" << -signedImmediate;
+            } else {
+                os << std::hex << "+" << signedImmediate;
+            }
             break;
         case CPUInstructionImmediateType::None:
         default:
