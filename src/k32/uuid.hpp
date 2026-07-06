@@ -38,7 +38,7 @@ private:
             throw std::runtime_error("Invalid UUID string");
         }
 
-        if (str[8] != '-' || str[12] != '-' || str[16] != '-' || str[20] != '-') {
+        if (str[8] != '-' || str[13] != '-' || str[18] != '-' || str[23] != '-') {
             throw std::runtime_error("Invalid UUID string");
         }
 

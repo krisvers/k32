@@ -1,5 +1,6 @@
 #pragma once
 
+#include <corecrt_wstring.h>
 #include <cstdint>
 #include <stdexcept>
 #include <map>
@@ -10,22 +11,30 @@ namespace k32 {
 using MemoryAddress = uint32_t;
 using MemoryExtent = uint32_t;
 
+inline constexpr MemoryExtent kilobytes(unsigned long long kb) {
+    return kb << 10;
+}
+
+inline constexpr MemoryExtent megabytes(unsigned long long mb) {
+    return mb << 20;
+}
+
+inline constexpr MemoryExtent gigabytes(unsigned long long gb) {
+    return gb << 30;
+}
+
 namespace memory_literals {
 
-inline constexpr MemoryExtent operator""_K(unsigned long long kilobytes) {
-    return kilobytes << 10;
+inline constexpr MemoryExtent operator""_KB(unsigned long long kb) {
+    return kilobytes(kb);
 }
 
-inline constexpr MemoryExtent operator""_M(unsigned long long megabytes) {
-    return megabytes << 20;
+inline constexpr MemoryExtent operator""_MB(unsigned long long mb) {
+    return megabytes(mb);
 }
 
-inline constexpr MemoryExtent operator""_G(unsigned long long gigabytes) {
-    return gigabytes << 30;
-}
-
-inline constexpr MemoryExtent operator""_T(unsigned long long terabytes) {
-    return terabytes << 40;
+inline constexpr MemoryExtent operator""_GB(unsigned long long gb) {
+    return gigabytes(gb);
 }
 
 }
@@ -71,7 +80,7 @@ public:
     }
 
     bool validateRegion(MemoryAddress address, MemoryExtent extent) const noexcept override {
-        return address + extent < _extent;
+        return (address + extent) < _extent;
     }
 
     uint32_t word(MemoryAddress address) const override {
@@ -79,7 +88,7 @@ public:
             throw std::runtime_error("Memory address is not multiple of 4 bytes");
         }
 
-        if (validateRegion(address, 4)) {
+        if (!validateRegion(address, 4)) {
             throw std::runtime_error("Memory address is out of bounds");
         }
 
@@ -91,7 +100,7 @@ public:
             throw std::runtime_error("Memory address is not multiple of 4 bytes");
         }
 
-        if (validateRegion(address, 4)) {
+        if (!validateRegion(address, 4)) {
             throw std::runtime_error("Memory address is out of bounds");
         }
 
@@ -171,6 +180,10 @@ private:
         }
 
         auto it = _regions.lower_bound(address);
+        if (it == _regions.end()) {
+            return _regions.end();
+        }
+
         if (it->second.memoryDevice->validateRegion(address - it->second.mappedAddress)) {
             return it;
         }

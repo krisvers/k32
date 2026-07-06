@@ -1,10 +1,12 @@
 #pragma once
 
-#include "uuid.hpp"
-#include "memory.hpp"
+#include "../uuid.hpp"
+#include "../memory.hpp"
 #include "device.hpp"
 
 namespace k32 {
+
+namespace dev {
 
 enum class GPUStatusFlags : uint32_t {
     None = 0x00000000,
@@ -48,6 +50,10 @@ public:
         return uuid();
     }
 
+    bool execute() override {
+        return true;
+    }
+
     MemoryAddress getRegisterMemoryExternalAddress() const {
         return EXTERNAL_REGISTER_MEMORY_ADDRESS;
     }
@@ -60,5 +66,7 @@ public:
         return UUID("4132ba0e-2faf-4a13-b701-9e26f354f1d2");
     }
 };
+
+}
 
 }

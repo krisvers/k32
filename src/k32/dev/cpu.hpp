@@ -1,0 +1,1180 @@
+#pragma once
+
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <vector>
+#include <iostream>
+
+#include "../uuid.hpp"
+#include "../memory.hpp"
+#include "device.hpp"
+#include "gpu.hpp"
+
+namespace k32 {
+
+namespace dev {
+
+using CPUInstructionWord = uint32_t;
+using CPURegisterID = uint32_t;
+
+enum class CPUInstructionID : uint32_t {
+    /* load/store */
+    LI = 0x00,
+    LMR = 0x01,
+    LMIP = 0x02,
+    SMR = 0x03,
+    SMIP = 0x04,
+
+    /* arithmetic */
+    ADD4 = 0x05,
+    UADD = 0x06,
+    SUB3 = 0x07,
+    USUB = 0x08,
+    MUL4 = 0x09,
+    UMUL = 0x0a,
+    DIV4 = 0x0b,
+    UDIV = 0x0c,
+
+    /* logic */
+    AND4 = 0x0d,
+    AND = 0x0e,
+    OR4 = 0x0f,
+    OR = 0x10,
+    XOR4 = 0x11,
+    XOR = 0x12,
+    SH4 = 0x13,
+    SH = 0x14,
+
+    /* jumps/branches */
+    JR = 0x15,
+    JIP = 0x16,
+
+    /* special */
+    SPI = 0x17,
+
+    /* floating point */
+    FI = 0x18,
+    FAS = 0x19,
+    FMUL = 0x1a,
+    FDIV = 0x1b,
+    FSQRT = 0x1c,
+    FLOG = 0x1d,
+    FPOW = 0x1e,
+    FTYPE = 0x1f,
+};
+
+enum class CPUConditionID : uint32_t {
+    IFZ = 0x0,
+    IFNZ = 0x1,
+    IFEQ = IFZ,
+    IFNEQ = IFNZ,
+
+    IFC = 0x2,
+    IFNC = 0x3,
+    IFUL = IFC,
+    IFUNGEQ = IFC,
+    IFUNL = IFNC,
+    IFUGEQ = IFNC,
+
+    IFUG = 0x4,
+    IFUNG = 0x5,
+    IFUNLEQ = IFUG,
+    IFULEQ = IFUNG,
+
+    IFO = 0x6,
+    IFNO = 0x7,
+
+    IFS = 0x8,
+    IFNS = 0x9,
+
+    IFSYS = 0xa,
+
+    IFL = 0xb,
+    IFNL = 0xc,
+    IFNGEQ = IFL,
+    IFGEQ = IFNL,
+
+    IFG = 0xd,
+    IFNG = 0xe,
+    IFNLEQ = IFG,
+    IFLEQ = IFNG,
+
+    ALWAYS = 0xf,
+};
+
+enum class CPUInterruptID : uint32_t {
+    None = 0,
+    DivideByZero = 1,
+    MemoryFault = 2,
+    InvalidPermissions = 3,
+    InvalidInstruction = 4,
+
+    DeviceMessage = 32,
+};
+
+class CPUFault : public std::runtime_error {
+private:
+    CPUInterruptID _id;
+
+public:
+    CPUFault(CPUInterruptID id, const char* message) : std::runtime_error(message), _id(id) {}
+
+    CPUInterruptID id() const {
+        return _id;
+    }
+};
+
+class CPUInstructionInfo {
+private:
+    CPUInstructionID _opcode;
+    CPUConditionID _condition;
+    std::vector<CPURegisterID> _integerRegisterIDs;
+    std::vector<CPURegisterID> _floatRegisterIDs;
+    std::vector<CPURegisterID> _specialRegisterIDs;
+    uint32_t _immediateValue;
+    uint32_t _flags;
+
+public:
+    CPUInstructionInfo(CPUInstructionWord word) {
+        _opcode = static_cast<CPUInstructionID>(word & 0x001f);
+        _condition = static_cast<CPUConditionID>((word >> 5) & 0x000f);
+
+        /* decode parameters */
+        switch (_opcode) {
+            case CPUInstructionID::MUL4:
+            case CPUInstructionID::DIV4:
+            case CPUInstructionID::AND4:
+            case CPUInstructionID::OR4:
+            case CPUInstructionID::XOR4:
+            case CPUInstructionID::SH4:
+                /* A.4r.flag1 */
+                _flags = (word >> 29) & 0x01;
+            case CPUInstructionID::ADD4:
+                /* A.4r.X */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 19) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 24) & 0x1f));
+                break;
+
+            case CPUInstructionID::UADD:
+                /* A.3r.1imm8 */
+                _immediateValue = (word >> 24) & 0xff;
+            case CPUInstructionID::SUB3:
+                /* A.3r.X */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 19) & 0x1f));
+                break;
+
+            case CPUInstructionID::AND:
+            case CPUInstructionID::OR:
+            case CPUInstructionID::XOR:
+            case CPUInstructionID::SH:
+                /* A.2r.1imm12.flag1 */
+                _flags = (word >> 19) & 0x01;
+            case CPUInstructionID::LMR:
+            case CPUInstructionID::SMR:
+            case CPUInstructionID::USUB:
+            case CPUInstructionID::UMUL:
+            case CPUInstructionID::UDIV:
+                /* A.2r.1imm12.X / A.2r.1signed12.X */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x1f));
+
+                _immediateValue = (word >> 20) & 0xfff;
+                break;
+
+            case CPUInstructionID::LI:
+            case CPUInstructionID::LMIP:
+            case CPUInstructionID::SMIP:
+            case CPUInstructionID::JR:
+                /* A.1r.1imm16 */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+
+                _immediateValue = (word >> 16) & 0xffff;
+                break;
+
+            case CPUInstructionID::SPI:
+                /* A.1r.1sp.flag3 */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+                _specialRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x0f));
+
+                _flags = (word >> 18) & 0x07;
+                break;
+
+            case CPUInstructionID::JIP:
+                _immediateValue = (word >> 12) & 0xfffff;
+                break;
+
+            case CPUInstructionID::FI:
+                /* A.1r.1f.flag3 */
+                _integerRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x1f));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 14) & 0x07));
+
+                _flags = (word >> 17) & 0x07;
+                break;
+
+            case CPUInstructionID::FAS:
+                /* A.6f.flag1 */
+                _flags = (word >> 27) & 0x01;
+            case CPUInstructionID::FMUL:
+            case CPUInstructionID::FSQRT:
+            case CPUInstructionID::FLOG:
+            case CPUInstructionID::FPOW:
+                /* A.6f.X */
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 12) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 15) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 18) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 21) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 24) & 0x07));
+                break;
+
+            case CPUInstructionID::FDIV:
+                /* A.7f */
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 12) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 15) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 18) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 21) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 24) & 0x07));
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 27) & 0x07));
+                break;
+
+
+            case CPUInstructionID::FTYPE:
+                /* A.1f */
+                _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x07));
+                break;
+
+            default:
+                throw CPUFault(CPUInterruptID::InvalidInstruction, "Unrecognized opcode");
+        }
+    }
+
+    CPUInstructionID opcode() const {
+        return _opcode;
+    }
+
+    CPUConditionID condition() const {
+        return _condition;
+    }
+
+    CPURegisterID rid(size_t index) const {
+        if (_integerRegisterIDs.size() <= index) {
+            throw std::runtime_error("Invalid integer register lookup index");
+        }
+
+        return _integerRegisterIDs[index];
+    }
+
+    CPURegisterID fid(size_t index) const {
+        if (_floatRegisterIDs.size() <= index) {
+            throw std::runtime_error("Invalid float register lookup index");
+        }
+
+        return _floatRegisterIDs[index];
+    }
+
+    CPURegisterID spid(size_t index) const {
+        if (_integerRegisterIDs.size() <= index) {
+            throw std::runtime_error("Invalid special register lookup index");
+        }
+
+        return _specialRegisterIDs[index];
+    }
+
+    uint32_t unsigned8() const {
+        return _immediateValue;
+    }
+
+    uint32_t unsigned12() const {
+        return _immediateValue;
+    }
+
+    uint32_t unsigned16() const {
+        return _immediateValue;
+    }
+
+    uint32_t unsigned20() const {
+        return _immediateValue;
+    }
+
+    int32_t signed8() const {
+        if ((_immediateValue & 0x80) != 0) {
+            return -(((~_immediateValue) & 0xff) - 1);
+        }
+
+        return _immediateValue;
+    }
+
+    int32_t signed12() const {
+        if ((_immediateValue & 0x800) != 0) {
+            return -(((~_immediateValue) & 0xfff) - 1);
+        }
+
+        return _immediateValue;
+    }
+
+    int32_t signed16() const {
+        if ((_immediateValue & 0x8000) != 0) {
+            return -(((~_immediateValue) & 0xffff) - 1);
+        }
+
+        return _immediateValue;
+    }
+
+    int32_t signed20() const {
+        if ((_immediateValue & 0x80000) != 0) {
+            return -(((~_immediateValue) & 0xfffff) - 1);
+        }
+
+        return _immediateValue;
+    }
+
+    uint32_t flags() const {
+        return _flags;
+    }
+};
+
+template<typename T>
+class CPURegister {
+private:
+    T _value = {};
+    bool _readAllowed = true;
+    bool _writeAllowed = true;
+
+public:
+    CPURegister() = default;
+    CPURegister(T const& value) : _value(value), _readAllowed(false), _writeAllowed(false) {}
+
+    CPURegister<T>& operator=(T const& value) {
+        if (!_writeAllowed) {
+            throw CPUFault(CPUInterruptID::InvalidPermissions, "Register is not writable");
+        }
+
+        _value = value;
+        return *this;
+    }
+
+    operator T() const {
+        if (!_readAllowed) {
+            throw CPUFault(CPUInterruptID::InvalidPermissions, "Register is not readable");
+        }
+
+        return _value;
+    }
+
+    void setReadable(bool readable) {
+        _readAllowed = readable;
+    }
+
+    bool getReadable() {
+        return _readAllowed;
+    }
+
+    void setWritable(bool writable) {
+        _writeAllowed = writable;
+    }
+
+    bool getWritable() {
+        return _writeAllowed;
+    }
+
+    T& raw() {
+        return _value;
+    }
+};
+
+struct CPUStatus {
+    bool zero;
+    bool carry;
+    bool overflow;
+    bool sign;
+    bool system;
+    bool interrupt;
+
+    CPUStatus() = default;
+
+    CPUStatus(CPUStatus const& other) {
+        zero = other.zero;
+        carry = other.carry;
+        overflow = other.overflow;
+        sign = other.sign;
+        system = other.system;
+        interrupt = other.interrupt;
+    }
+
+    CPUStatus& operator=(CPUStatus const& other) {
+        zero = other.zero;
+        carry = other.carry;
+        overflow = other.overflow;
+        sign = other.sign;
+        system = other.system;
+        interrupt = other.interrupt;
+        return *this;
+    }
+
+    bool operator==(CPUStatus const& other) {
+        return
+            zero == other.zero &&
+            carry == other.carry &&
+            overflow == other.overflow &&
+            sign == other.sign &&
+            system == other.system &&
+            interrupt == other.interrupt;
+    }
+
+    bool operator!=(CPUStatus const& other) {
+        return !CPUStatus::operator==(other);
+    }
+
+    bool condition(CPUConditionID condition) {
+        switch (condition) {
+            case CPUConditionID::IFZ:
+                return zero;
+            case CPUConditionID::IFNZ:
+                return !zero;
+            case CPUConditionID::IFC:
+                return carry;
+            case CPUConditionID::IFNC:
+                return !carry;
+            case CPUConditionID::IFUG:
+                return !carry && !zero;
+            case CPUConditionID::IFUNG:
+                return !zero;
+            case CPUConditionID::IFO:
+                return overflow;
+            case CPUConditionID::IFNO:
+                return !overflow;
+            case CPUConditionID::IFS:
+                return sign;
+            case CPUConditionID::IFNS:
+                return !sign;
+            case CPUConditionID::IFSYS:
+                return system;
+            case CPUConditionID::IFL:
+                return sign == overflow;
+            case CPUConditionID::IFNL:
+                return sign != overflow;
+            case CPUConditionID::IFG:
+                return sign == overflow && !zero;
+            case CPUConditionID::IFNG:
+                return sign != overflow && zero;
+            case CPUConditionID::ALWAYS:
+                return true;
+            default:
+                throw std::runtime_error("Unknown condition ID");
+        }
+    }
+};
+
+class CPURegisters {
+private:
+    /* general-purpose */
+    CPURegister<uint32_t> _r[32] = {};
+    CPURegister<float> _f[8] = {};
+
+    /* special system-only */
+    CPURegister<MemoryAddress> _p[4] = {};
+    CPURegister<MemoryAddress> _mmtable = {};
+    CPURegister<MemoryAddress> _inthandler = {};
+    CPURegister<uint32_t> _level = {};
+
+    /* special system and user level */
+    CPURegister<uint32_t> _interrupt = {};
+
+    /* hidden */
+    MemoryAddress _ip = {};
+    CPUStatus _status = {};
+
+    /* implementation detail */
+    MemoryAddress _interruptOriginIP = {};
+    CPUStatus _interruptOriginStatus = {};
+
+    void updateAccessPermissions() {
+        for (auto& r : _r) {
+            r.setReadable(true);
+            r.setWritable(true);
+        }
+
+        for (auto& f : _f) {
+            f.setReadable(true);
+            f.setWritable(true);
+        }
+
+        for (auto& p : _p) {
+            p.setReadable(status().system);
+            p.setWritable(status().system);
+        }
+
+        _mmtable.setReadable(status().system);
+        _mmtable.setWritable(status().system);
+
+        _inthandler.setReadable(status().system);
+        _inthandler.setWritable(status().system);
+
+        _level.setReadable(status().system);
+        _level.setWritable(status().system);
+
+        _interrupt.setReadable(status().system);
+        _interrupt.setWritable(true);
+    }
+
+public:
+    CPURegisters() {
+        updateAccessPermissions();
+    }
+
+    uint32_t r(CPURegisterID id) {
+        if (id >= 32) {
+            throw std::runtime_error("Integer register ID out of range");
+        }
+
+        return _r[id];
+    }
+
+    void r(CPURegisterID id, uint32_t value) {
+        if (id >= 32) {
+            throw std::runtime_error("Integer register ID out of range");
+        }
+
+        _r[id] = value;
+    }
+
+    float f(CPURegisterID id) {
+        if (id >= 8) {
+            throw std::runtime_error("Float register ID out of range");
+        }
+
+        return _f[id];
+    }
+
+    void f(CPURegisterID id, float value) {
+        if (id >= 8) {
+            throw std::runtime_error("Float register ID out of range");
+        }
+
+        _f[id] = value;
+    }
+
+    uint32_t p(CPURegisterID id) {
+        if (id >= 4) {
+            throw std::runtime_error("Pointer register ID out of range");
+        }
+
+        return _p[id];
+    }
+
+    void p(CPURegisterID id, uint32_t value) {
+        if (id >= 4) {
+            throw std::runtime_error("Pointer register ID out of range");
+        }
+
+        _p[id] = value;
+    }
+
+    MemoryAddress mmtable() {
+        return _mmtable;
+    }
+
+    void mmtable(MemoryAddress mmtable) {
+        _mmtable = mmtable;
+    }
+
+    MemoryAddress inthandler() {
+        return _inthandler;
+    }
+
+    void inthandler(MemoryAddress inthandler) {
+        _inthandler = inthandler;
+    }
+
+    uint32_t level() {
+        return _level;
+    }
+
+    void level(uint32_t level) {
+        _level = level;
+    }
+
+    uint32_t interrupt() {
+        return _interrupt;
+    }
+
+    void interrupt(uint32_t interrupt) {
+        _interrupt = interrupt;
+
+        if (status().interrupt) {
+            if (interrupt == 0) {
+                _ip = _interruptOriginIP;
+                status(_interruptOriginStatus);
+            }
+        } else if (interrupt != 0) {
+            if (_inthandler != 0) {
+                _interruptOriginIP = _ip;
+                _interruptOriginStatus = _status;
+
+                _ip = _inthandler;
+
+                CPUStatus newStatus = _status;
+                newStatus.system = true;
+                newStatus.interrupt = true;
+                status(newStatus);
+            }
+        }
+    }
+
+    uint32_t sp(CPURegisterID id) {
+        if (id >= 16) {
+            throw std::runtime_error("Special register ID out of range");
+        }
+
+        if (id < 4) {
+            return p(id);
+        }
+
+        if (id == 4) {
+            return mmtable();
+        }
+
+        if (id == 5) {
+            return inthandler();
+        }
+
+        if (id == 6) {
+            return level();
+        }
+
+        if (id == 8) {
+            return interrupt();
+        }
+
+        throw std::runtime_error("Special register ID unallocated; cannot access register");
+    }
+
+    void sp(CPURegisterID id, uint32_t value) {
+        if (id >= 16) {
+            throw std::runtime_error("Special register ID out of range");
+        }
+
+        if (id < 4) {
+            p(id, value);
+        } else if (id == 4) {
+            mmtable(value);
+        } else if (id == 5) {
+            inthandler(value);
+        } else if (id == 6) {
+            level(value);
+        } else if (id == 8) {
+            interrupt(value);
+        } else {
+            throw std::runtime_error("Special register ID unallocated; cannot access register");
+        }
+    }
+
+    MemoryAddress& ip() {
+        return _ip;
+    }
+
+    CPUStatus status() {
+        return _status;
+    }
+
+    void status(CPUStatus const& status) {
+        _status = status;
+        updateAccessPermissions();
+    }
+};
+
+class CPU : public IDevice {
+private:
+    CPURegisters _registers = {};
+    BufferMemory _systemMemory;
+    MemoryGroup _mmu = {};
+
+    GPU* _gpu = nullptr;
+
+    static const MemoryAddress GPU_SHARED_MEMORY_MAPPED_ADDRESS = 0xff000000;
+
+public:
+    CPU(MemoryExtent systemMemoryExtent) : _systemMemory(systemMemoryExtent) {
+        _mmu.mapDevice(0x00000000, &_systemMemory);
+    }
+
+    ~CPU() {
+
+    }
+
+    bool addChildDevice(IDevice* device) {
+        if (device->getTypeUUID() == GPU::uuid()) {
+            _gpu = dynamic_cast<GPU*>(device);
+            IMemoryDevice* gpuMemory = device->getExternalMemoryDevice();
+            if (gpuMemory == nullptr) {
+                throw std::runtime_error("GPU has no mappable memory");
+            }
+
+            if (!_mmu.mapDevice(GPU_SHARED_MEMORY_MAPPED_ADDRESS, gpuMemory)) {
+                throw std::runtime_error("Failed to map GPU memory to MMU");
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    IMemoryDevice* getExternalMemoryDevice() override {
+        return &_mmu;
+    }
+
+    bool execute() override {
+        std::cout <<
+            "r0 " << _registers.r(0) << " " <<
+            "r1 " << _registers.r(1) << " " <<
+            "r2 " << _registers.r(2) << " " <<
+            "r3 " << _registers.r(3) << std::endl <<
+            "r4 " << _registers.r(4) << " " <<
+            "r5 " << _registers.r(5) << " " <<
+            "r6 " << _registers.r(6) << " " <<
+            "r7 " << _registers.r(7) << std::endl <<
+            "r8 " << _registers.r(8) << " " <<
+            "r9 " << _registers.r(9) << " " <<
+            "r10 " << _registers.r(10) << " " <<
+            "r11 " << _registers.r(11) << std::endl <<
+            "r12 " << _registers.r(12) << " " <<
+            "r13 " << _registers.r(13) << " " <<
+            "r14 " << _registers.r(14) << " " <<
+            "r15 " << _registers.r(15) << std::endl <<
+            "r16 " << _registers.r(16) << " " <<
+            "r17 " << _registers.r(17) << " " <<
+            "r18 " << _registers.r(18) << " " <<
+            "r19 " << _registers.r(19) << std::endl <<
+            "r20 " << _registers.r(20) << " " <<
+            "r21 " << _registers.r(21) << " " <<
+            "r22 " << _registers.r(22) << " " <<
+            "r23 " << _registers.r(23) << std::endl <<
+            "r24 " << _registers.r(24) << " " <<
+            "r25 " << _registers.r(25) << " " <<
+            "r26 " << _registers.r(26) << " " <<
+            "r27 " << _registers.r(27) << std::endl <<
+            "r28 " << _registers.r(28) << " " <<
+            "r29 " << _registers.r(29) << " " <<
+            "r30 " << _registers.r(30) << " " <<
+            "r31 " << _registers.r(31) << std::endl <<
+            "ip " << _registers.ip() << std::endl;
+
+        CPUInstructionWord instructionWord = _mmu.word(_registers.ip());
+
+        CPUInstructionInfo instructionInfo = CPUInstructionInfo(instructionWord);
+        if (!_registers.status().condition(instructionInfo.condition())) {
+            _registers.ip() += 4;
+            return true;
+        }
+
+        CPUStatus status = _registers.status();
+        switch (instructionInfo.opcode()) {
+            case CPUInstructionID::LI:
+                _registers.r(instructionInfo.rid(0),
+                    (_registers.r(instructionInfo.rid(0)) & 0xffff0000) |
+                    instructionInfo.unsigned16());
+                break;
+            case CPUInstructionID::LMR:
+                _registers.r(instructionInfo.rid(0),
+                    _mmu.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12()));
+                break;
+            case CPUInstructionID::LMIP:
+                _registers.r(instructionInfo.rid(0),
+                    _mmu.word(_registers.ip() + instructionInfo.signed16()));
+                break;
+            case CPUInstructionID::SMR:
+                _mmu.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12(),
+                    _registers.r(instructionInfo.rid(0)));
+                break;
+            case CPUInstructionID::SMIP:
+                _mmu.word(_registers.ip() + instructionInfo.signed16(),
+                    _registers.r(instructionInfo.rid(0)));
+                break;
+            case CPUInstructionID::ADD4: {
+                uint64_t a = _registers.r(instructionInfo.rid(2));
+                uint64_t b = _registers.r(instructionInfo.rid(3));
+                uint64_t x = a + b;
+
+                _registers.r(instructionInfo.rid(0),
+                    static_cast<uint32_t>(x & 0xffffffff));
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1),
+                        static_cast<uint32_t>(x >> 32));
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::UADD: {
+                uint64_t a = _registers.r(instructionInfo.rid(1));
+                uint64_t b = instructionInfo.unsigned12();
+                uint64_t x = a + b;
+
+                _registers.r(instructionInfo.rid(0),
+                    static_cast<uint32_t>(x & 0xffffffff));
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::SUB3: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = _registers.r(instructionInfo.rid(2));
+                uint32_t x = a - b;
+
+                _registers.r(instructionInfo.rid(0), x);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::USUB: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a - b;
+
+                _registers.r(instructionInfo.rid(0), x);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::MUL4: {
+                uint32_t a = _registers.r(instructionInfo.rid(2));
+                uint32_t b = _registers.r(instructionInfo.rid(3));
+
+                int64_t x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    int32_t ia = *reinterpret_cast<int32_t*>(&a);
+                    int32_t ib = *reinterpret_cast<int32_t*>(&b);
+                    x = ia * ib;
+                } else {
+                    x = a * b;
+                }
+
+                _registers.r(instructionInfo.rid(0),
+                    static_cast<uint32_t>(x & 0xffffffff));
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1),
+                        static_cast<uint32_t>(*reinterpret_cast<uint64_t*>(&x) >> 32));
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::UMUL: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a * b;
+
+                _registers.r(instructionInfo.rid(0), x);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::DIV4: {
+                uint64_t a = _registers.r(instructionInfo.rid(2));
+                uint64_t b = _registers.r(instructionInfo.rid(3));
+
+                int64_t x;
+                uint32_t remainder;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    int32_t ia = *reinterpret_cast<int32_t*>(&a);
+                    int32_t ib = *reinterpret_cast<int32_t*>(&b);
+                    x = ia / ib;
+                    remainder = ia % ib;
+                } else {
+                    x = a / b;
+                    remainder = a % b;
+                }
+
+                _registers.r(instructionInfo.rid(0),
+                    static_cast<uint32_t>(x & 0xffffffff));
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1), remainder);
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::UDIV: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a / b;
+
+                _registers.r(instructionInfo.rid(0), x);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::AND4: {
+                uint32_t a = _registers.r(instructionInfo.rid(2));
+                uint32_t b = _registers.r(instructionInfo.rid(3));
+                uint32_t x = a & b;
+
+                uint32_t x0 = x;
+                uint32_t x1 = ~x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                    x1 = x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1), x1);
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::AND: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a & b;
+
+                uint32_t x0 = x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::OR4: {
+                uint32_t a = _registers.r(instructionInfo.rid(2));
+                uint32_t b = _registers.r(instructionInfo.rid(3));
+                uint32_t x = a | b;
+
+                uint32_t x0 = x;
+                uint32_t x1 = ~x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                    x1 = x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1), x1);
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::OR: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a | b;
+
+                uint32_t x0 = x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::XOR4: {
+                uint32_t a = _registers.r(instructionInfo.rid(2));
+                uint32_t b = _registers.r(instructionInfo.rid(3));
+                uint32_t x = a ^ b;
+
+                uint32_t x0 = x;
+                uint32_t x1 = ~x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                    x1 = x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1), x1);
+                }
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::XOR: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+                uint32_t x = a ^ b;
+
+                uint32_t x0 = x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = ~x;
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::SH4: {
+                uint32_t a = _registers.r(instructionInfo.rid(2));
+                uint32_t b = _registers.r(instructionInfo.rid(3));
+
+                uint32_t x0;
+                uint32_t x1;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    uint64_t x = static_cast<uint64_t>(a) << 32 >> static_cast<uint64_t>(b);
+                    x0 = static_cast<uint32_t>(x >> 32);
+                    x1 = static_cast<uint32_t>(x & 0xffffffff);
+                } else {
+                    uint64_t x = static_cast<uint64_t>(a) << static_cast<uint64_t>(b);
+                    x0 = static_cast<uint32_t>(x & 0xffffffff);
+                    x1 = static_cast<uint32_t>(x >> 32);
+                }
+
+                _registers.r(instructionInfo.rid(0), x0);
+
+                if (instructionInfo.rid(1) != instructionInfo.rid(0)) {
+                    _registers.r(instructionInfo.rid(1), x1);
+                }
+
+                status.zero = (x0 == 0);
+                status.carry = (x0 > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x0) & 0x80000000) != 0);
+                status.sign = ((x0 & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::SH: {
+                uint32_t a = _registers.r(instructionInfo.rid(1));
+                uint32_t b = instructionInfo.unsigned12();
+
+                uint32_t x;
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x = a >> b;
+                } else {
+                    x = a << b;
+                }
+
+                _registers.r(instructionInfo.rid(0), x);
+
+                status.zero = (x == 0);
+                status.carry = (x > std::numeric_limits<uint32_t>::max());
+                status.overflow = (((a ^ b) & 0x80000000) && ((a ^ x) & 0x80000000) != 0);
+                status.sign = ((x & 0x80000000) != 0);
+                break;
+            }
+            case CPUInstructionID::JR:
+                _registers.ip() = _registers.r(instructionInfo.rid(0)) + instructionInfo.signed16();
+                break;
+            case CPUInstructionID::JIP:
+                _registers.ip() += instructionInfo.signed20();
+                break;
+            case CPUInstructionID::SPI: {
+                uint32_t r = _registers.r(instructionInfo.rid(0));
+                uint32_t sp = _registers.sp(instructionInfo.spid(0));
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    _registers.sp(instructionInfo.spid(0), r);
+                }
+
+                if ((instructionInfo.flags() & 0x02) != 0) {
+                    _registers.r(instructionInfo.rid(0), sp);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FI: {
+                uint32_t r = _registers.r(instructionInfo.rid(0));
+                float f = _registers.f(instructionInfo.fid(0));
+
+                uint32_t rf;
+                float fr;
+                if ((instructionInfo.flags() & 0x04) != 0) {
+                    rf = *reinterpret_cast<uint32_t*>(&f);
+                    fr = *reinterpret_cast<float*>(&r);
+                } else {
+                    rf = static_cast<uint32_t>(f);
+                    fr = static_cast<float>(r);
+                }
+
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    _registers.f(instructionInfo.fid(0), fr);
+                }
+
+                if ((instructionInfo.flags() & 0x02) != 0) {
+                    _registers.r(instructionInfo.rid(0), rf);
+                }
+
+                break;
+            }
+            default:
+                throw CPUFault(CPUInterruptID::InvalidInstruction, "Invalid or unimplemented instruction");
+        }
+
+        if (status != _registers.status()) {
+            _registers.status(status);
+        }
+
+        _registers.ip() += 4;
+        return true;
+    }
+
+    UUID getTypeUUID() const override {
+        return uuid();
+    }
+
+    static UUID uuid() {
+        return UUID("524c3600-02c2-4414-8273-d5ac484bdad7");
+    }
+};
+
+}
+
+}

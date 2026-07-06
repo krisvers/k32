@@ -1,9 +1,11 @@
 #pragma once
 
-#include "uuid.hpp"
-#include "memory.hpp"
+#include "../uuid.hpp"
+#include "../memory.hpp"
 
 namespace k32 {
+
+namespace dev {
 
 class IDevice {
 public:
@@ -12,5 +14,7 @@ public:
 
     virtual bool execute() = 0;
 };
+
+}
 
 }
