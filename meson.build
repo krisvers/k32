@@ -1,13 +1,21 @@
 project('k32', 'cpp', default_options: ['cpp_std=c++20'])
 
-executable('k32',
+executable('kemu',
     sources: [
-        'src/k32/memory.hpp',
-        'src/k32/uuid.hpp',
-        'src/k32/dev/device.hpp',
-        'src/k32/dev/cpu.hpp',
-        'src/k32/dev/gpu.hpp',
-        'src/emulator.cpp',
+        'src/kemu/memory.hpp',
+        'src/kemu/uuid.hpp',
+        'src/kemu/dev/device.hpp',
+        'src/kemu/dev/cpu.hpp',
+        'src/kemu/dev/gpu.hpp',
+        'src/kemu/emulator.cpp',
+    ],
+    include_directories: include_directories('src'),
+    override_options: ['cpp_std=c++20'],
+)
+
+executable('kasm',
+    sources: [
+
     ],
     include_directories: include_directories('src'),
     override_options: ['cpp_std=c++20'],

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -11,7 +12,7 @@
 #include "device.hpp"
 #include "gpu.hpp"
 
-namespace k32 {
+namespace kemu {
 
 namespace dev {
 
@@ -430,7 +431,6 @@ public:
                 _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 27) & 0x07));
                 break;
 
-
             case CPUInstructionID::FTYPE:
                 /* A.1f */
                 _floatRegisterIDs.push_back(static_cast<CPURegisterID>((word >> 9) & 0x07));
@@ -642,12 +642,12 @@ public:
 };
 
 struct CPUStatus {
-    bool zero;
-    bool carry;
-    bool overflow;
-    bool sign;
-    bool system;
-    bool interrupt;
+    bool zero = false;
+    bool carry = false;
+    bool overflow = false;
+    bool sign = false;
+    bool user = false;
+    bool interrupt = false;
 
     CPUStatus() = default;
 
@@ -656,7 +656,7 @@ struct CPUStatus {
         carry = other.carry;
         overflow = other.overflow;
         sign = other.sign;
-        system = other.system;
+        user = other.user;
         interrupt = other.interrupt;
     }
 
@@ -665,7 +665,7 @@ struct CPUStatus {
         carry = other.carry;
         overflow = other.overflow;
         sign = other.sign;
-        system = other.system;
+        user = other.user;
         interrupt = other.interrupt;
         return *this;
     }
@@ -676,7 +676,7 @@ struct CPUStatus {
             carry == other.carry &&
             overflow == other.overflow &&
             sign == other.sign &&
-            system == other.system &&
+            user == other.user &&
             interrupt == other.interrupt;
     }
 
@@ -707,7 +707,7 @@ struct CPUStatus {
             case CPUConditionID::IFNS:
                 return !sign;
             case CPUConditionID::IFSYS:
-                return system;
+                return !user;
             case CPUConditionID::IFL:
                 return sign == overflow;
             case CPUConditionID::IFNL:
@@ -729,7 +729,7 @@ inline std::ostream& operator<<(std::ostream& os, CPUStatus const& status) {
         << (status.carry ? 'C' : '_')
         << (status.overflow ? 'O' : '_')
         << (status.sign ? 'S' : '_')
-        << (status.system ? 'Y' : '_')
+        << (status.user ? 'U' : '_')
         << (status.interrupt ? 'I' : '_');
     return os;
 }
@@ -744,9 +744,9 @@ private:
     CPURegister<MemoryAddress> _p[4] = {};
     CPURegister<MemoryAddress> _mmtable = {};
     CPURegister<MemoryAddress> _inthandler = {};
-    CPURegister<uint32_t> _level = {};
+    CPURegister<uint32_t> _sp6 = {};
 
-    /* special system and user level */
+    /* special system and user sp6 */
     CPURegister<uint32_t> _interrupt = {};
 
     /* hidden */
@@ -769,20 +769,20 @@ private:
         }
 
         for (auto& p : _p) {
-            p.setReadable(status().system);
-            p.setWritable(status().system);
+            p.setReadable(!status().user);
+            p.setWritable(!status().user);
         }
 
-        _mmtable.setReadable(status().system);
-        _mmtable.setWritable(status().system);
+        _mmtable.setReadable(!status().user);
+        _mmtable.setWritable(!status().user);
 
-        _inthandler.setReadable(status().system);
-        _inthandler.setWritable(status().system);
+        _inthandler.setReadable(!status().user);
+        _inthandler.setWritable(!status().user);
 
-        _level.setReadable(status().system);
-        _level.setWritable(status().system);
+        _sp6.setReadable(!status().user);
+        _sp6.setWritable(!status().user);
 
-        _interrupt.setReadable(status().system);
+        _interrupt.setReadable(!status().user);
         _interrupt.setWritable(true);
     }
 
@@ -855,12 +855,12 @@ public:
         _inthandler = inthandler;
     }
 
-    uint32_t level() {
-        return _level;
+    uint32_t sp6() {
+        return _sp6;
     }
 
-    void level(uint32_t level) {
-        _level = level;
+    void sp6(uint32_t sp6) {
+        _sp6 = sp6;
     }
 
     uint32_t interrupt() {
@@ -883,7 +883,7 @@ public:
                 _ip = _inthandler;
 
                 CPUStatus newStatus = _status;
-                newStatus.system = true;
+                newStatus.user = false;
                 newStatus.interrupt = true;
                 status(newStatus);
             }
@@ -908,7 +908,7 @@ public:
         }
 
         if (id == 6) {
-            return level();
+            return sp6();
         }
 
         if (id == 8) {
@@ -930,7 +930,10 @@ public:
         } else if (id == 5) {
             inthandler(value);
         } else if (id == 6) {
-            level(value);
+            sp6(value);
+
+            _status.user = ((value & 0x00000001) != 0);
+            updateAccessPermissions();
         } else if (id == 8) {
             interrupt(value);
         } else {
@@ -993,11 +996,89 @@ inline std::ostream& operator<<(std::ostream& os, CPURegisters registers) {
     return os;
 }
 
+struct CPUGlobalPageMode {
+    bool user;
+    bool exec;
+};
+
+struct CPUPagePermissions {
+    bool enabled;
+    bool read;
+    bool write;
+    bool execute;
+    bool user;
+};
+
+class CPUPage : public IMemoryDevice {
+private:
+    CPUGlobalPageMode const& _globalPageMode;
+    CPUPagePermissions _permissions;
+    MemoryAddress _baseAddress;
+    IMemoryDevice* _memoryDevice;
+
+public:
+    CPUPage(CPUGlobalPageMode const& globalPageMode, CPUPagePermissions permissions, MemoryAddress baseAddress, IMemoryDevice* memoryDevice) : _globalPageMode(globalPageMode), _permissions(permissions), _baseAddress(baseAddress), _memoryDevice(memoryDevice) {
+
+    }
+
+    MemoryExtent capacity() const noexcept override {
+        return kilobytes(4);
+    }
+
+    bool contiguous() const noexcept override {
+        return _memoryDevice->contiguous();
+    }
+
+    bool validateRegion(MemoryAddress address, MemoryExtent extent = 0) const noexcept override {
+        return (address + extent) < capacity();
+    }
+
+    uint32_t word(MemoryAddress address) const override {
+        if (!_permissions.enabled) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not enabled");
+        }
+
+        if (!_permissions.read) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not readable");
+        }
+
+        if (_globalPageMode.exec && !_permissions.execute) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not executable");
+        }
+
+        if (_globalPageMode.user && !_permissions.user) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not accessible from user level");
+        }
+
+        return _memoryDevice->word(_baseAddress + address);
+    }
+
+    void word(MemoryAddress address, uint32_t value) override {
+        if (!_permissions.enabled) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not enabled");
+        }
+
+        if (!_permissions.write) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not writable");
+        }
+
+        if (_globalPageMode.user && !_permissions.user) {
+            throw CPUFault(CPUInterruptID::MemoryFault, "Page is not accessible from user level");
+        }
+
+        _memoryDevice->word(_baseAddress + address, value);
+    }
+};
+
 class CPU : public IDevice {
 private:
     CPURegisters _registers = {};
     BufferMemory _systemMemory;
-    MemoryGroup _mmu = {};
+    MemoryGroup _physicalMMU = {};
+    MemoryGroup _virtualMMU = {};
+
+    CPUGlobalPageMode _globalPageMode = {};
+    std::vector<CPUPage> _pages = {};
 
     GPU* _gpu = nullptr;
 
@@ -1005,7 +1086,8 @@ private:
 
 public:
     CPU(MemoryExtent systemMemoryExtent) : _systemMemory(systemMemoryExtent) {
-        _mmu.mapDevice(0x00000000, &_systemMemory);
+        _physicalMMU.mapDevice(0x00000000, &_systemMemory);
+        _virtualMMU.mapDevice(0x00000000, &_physicalMMU);
     }
 
     ~CPU() {
@@ -1020,7 +1102,7 @@ public:
                 throw std::runtime_error("GPU has no mappable memory");
             }
 
-            if (!_mmu.mapDevice(GPU_SHARED_MEMORY_MAPPED_ADDRESS, gpuMemory)) {
+            if (!_physicalMMU.mapDevice(GPU_SHARED_MEMORY_MAPPED_ADDRESS, gpuMemory)) {
                 throw std::runtime_error("Failed to map GPU memory to MMU");
             }
 
@@ -1031,7 +1113,7 @@ public:
     }
 
     IMemoryDevice* getExternalMemoryDevice() override {
-        return &_mmu;
+        return &_physicalMMU;
     }
 
     bool execute() override {
@@ -1039,17 +1121,19 @@ public:
 
         CPUStatus status = _registers.status();
 
-        CPUInstructionWord instructionWord = _mmu.word(_registers.ip());
+        _globalPageMode.exec = true;
+        CPUInstructionWord instructionWord = _virtualMMU.word(_registers.ip());
+        _globalPageMode.exec = false;
+
         CPUInstructionInfo instructionInfo = CPUInstructionInfo(instructionWord);
 
         std::cout << "instruction: " << std::hex << instructionWord << ": " << instructionInfo << std::endl << std::endl;
 
+        _registers.ip() += 4;
         if (!_registers.status().condition(instructionInfo.condition())) {
-            _registers.ip() += 4;
             return true;
         }
 
-        bool progressIP = true;
         switch (instructionInfo.opcode()) {
             case CPUInstructionID::LI:
                 _registers.r(instructionInfo.rid(0),
@@ -1058,18 +1142,18 @@ public:
                 break;
             case CPUInstructionID::LMR:
                 _registers.r(instructionInfo.rid(0),
-                    _mmu.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12()));
+                    _virtualMMU.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12()));
                 break;
             case CPUInstructionID::LMIP:
                 _registers.r(instructionInfo.rid(0),
-                    _mmu.word(_registers.ip() + instructionInfo.signed16()));
+                    _virtualMMU.word(_registers.ip() + instructionInfo.signed16()));
                 break;
             case CPUInstructionID::SMR:
-                _mmu.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12(),
+                _virtualMMU.word(_registers.r(instructionInfo.rid(1)) + instructionInfo.signed12(),
                     _registers.r(instructionInfo.rid(0)));
                 break;
             case CPUInstructionID::SMIP:
-                _mmu.word(_registers.ip() + instructionInfo.signed16(),
+                _virtualMMU.word(_registers.ip() + instructionInfo.signed16(),
                     _registers.r(instructionInfo.rid(0)));
                 break;
             case CPUInstructionID::ADD4: {
@@ -1387,14 +1471,15 @@ public:
                 break;
             }
             case CPUInstructionID::JR:
-                progressIP = false;
+                _registers.r(31, _registers.ip());
                 _registers.ip() = _registers.r(instructionInfo.rid(0)) + instructionInfo.signed16();
                 break;
             case CPUInstructionID::JIP:
-                progressIP = false;
+                _registers.r(31, _registers.ip());
                 _registers.ip() += instructionInfo.signed20();
                 break;
             case CPUInstructionID::SPI: {
+                uint32_t previousMMTable = _registers.mmtable();
                 uint32_t r = _registers.r(instructionInfo.rid(0));
                 uint32_t sp = _registers.sp(instructionInfo.spid(0));
                 if ((instructionInfo.flags() & 0x01) != 0) {
@@ -1403,6 +1488,40 @@ public:
 
                 if ((instructionInfo.flags() & 0x02) != 0) {
                     _registers.r(instructionInfo.rid(0), sp);
+                }
+
+                if (_registers.mmtable() != previousMMTable) {
+                    /* load mmu table */
+                    _virtualMMU.clearMappedRegions();
+                    _pages.clear();
+
+                    if (_registers.mmtable() == 0x00000000) {
+                        _virtualMMU.mapDevice(0x00000000, &_physicalMMU);
+                    } else {
+                        for (uint32_t tableIndex = 0x00000000; tableIndex < 0x00000400; tableIndex += 1) {
+                            uint32_t physicalTableAddress = _physicalMMU.word(_registers.mmtable() + tableIndex * 4);
+                            if (physicalTableAddress == 0x00000000) {
+                                continue;
+                            }
+
+                            for (uint32_t pageIndex = 0x00000000; pageIndex < 0x00000400; pageIndex += 1) {
+                                uint32_t entry = _physicalMMU.word(physicalTableAddress + pageIndex * 4);
+                                CPUPagePermissions permissions = {};
+                                permissions.enabled = ((entry & 0x00000001) != 0);
+                                permissions.read = ((entry & 0x00000002) != 0);
+                                permissions.write = ((entry & 0x00000004) != 0);
+                                permissions.execute = ((entry & 0x00000008) != 0);
+                                permissions.user = ((entry & 0x00000010) != 0);
+
+                                uint32_t physicalPageAddressUpper = entry & 0xfffff000;
+                                CPUPage page = CPUPage(_globalPageMode, permissions, physicalPageAddressUpper, &_physicalMMU);
+                                _pages.push_back(page);
+
+                                uint32_t virtualPageAddress = (tableIndex << 22) | (pageIndex << 12);
+                                _virtualMMU.mapDevice(virtualPageAddress, &_physicalMMU);
+                            }
+                        }
+                    }
                 }
 
                 break;
@@ -1431,6 +1550,138 @@ public:
 
                 break;
             }
+            case CPUInstructionID::FAS: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float b0 = _registers.f(instructionInfo.fid(2));
+                float a1 = _registers.f(instructionInfo.fid(4));
+                float b1 = _registers.f(instructionInfo.fid(5));
+
+                float x0;
+                float x1;
+
+                if ((instructionInfo.flags() & 0x01) != 0) {
+                    x0 = a0 - b0;
+                    x1 = a1 - b1;
+                } else {
+                    x0 = a0 + b0;
+                    x1 = a1 + b1;
+                }
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(3) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(3), x1);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FMUL: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float b0 = _registers.f(instructionInfo.fid(2));
+                float a1 = _registers.f(instructionInfo.fid(4));
+                float b1 = _registers.f(instructionInfo.fid(5));
+
+                float x0 = a0 * b0;
+                float x1 = a1 * b1;
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(3) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(3), x1);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FDIV: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float b0 = _registers.f(instructionInfo.fid(2));
+                float a1 = _registers.f(instructionInfo.fid(4));
+                float b1 = _registers.f(instructionInfo.fid(5));
+
+                float x0 = a0 / b0;
+                float x1 = a1 / b1;
+                float y0 = std::fmod(a0, b0);
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(3) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(3), x1);
+                }
+
+                if (instructionInfo.fid(6) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(6), y0);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FSQRT: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float a1 = _registers.f(instructionInfo.fid(3));
+                float a2 = _registers.f(instructionInfo.fid(5));
+
+                float x0 = std::sqrtf(a0);
+                float x1 = std::sqrtf(a1);
+                float x2 = std::sqrtf(a2);
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(2) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(2), x1);
+                }
+
+                if (instructionInfo.fid(4) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(4), x2);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FLOG: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float a1 = _registers.f(instructionInfo.fid(3));
+                float a2 = _registers.f(instructionInfo.fid(5));
+
+                float x0 = std::log2f(a0);
+                float x1 = std::log2f(a1);
+                float x2 = std::log2f(a2);
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(2) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(2), x1);
+                }
+
+                if (instructionInfo.fid(4) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(4), x2);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FPOW: {
+                float a0 = _registers.f(instructionInfo.fid(1));
+                float b0 = _registers.f(instructionInfo.fid(2));
+                float a1 = _registers.f(instructionInfo.fid(4));
+                float b1 = _registers.f(instructionInfo.fid(5));
+
+                float x0 = std::powf(a0, b0);
+                float x1 = std::powf(a1, b1);
+
+                _registers.f(instructionInfo.fid(0), x0);
+
+                if (instructionInfo.fid(3) != instructionInfo.fid(0)) {
+                    _registers.f(instructionInfo.fid(3), x1);
+                }
+
+                break;
+            }
+            case CPUInstructionID::FTYPE: {
+                float f = _registers.f(instructionInfo.fid(0));
+                status.zero = (f == 0.0f);
+                status.sign = (f < 0.0f);
+                status.carry = (std::isinf(f));
+                status.overflow = (std::isnan(f));
+
+                break;
+            }
             default:
                 throw CPUFault(CPUInterruptID::InvalidInstruction, "Invalid or unimplemented instruction");
         }
@@ -1439,9 +1690,7 @@ public:
             _registers.status(status);
         }
 
-        if (progressIP) {
-            _registers.ip() += 4;
-        }
+        _globalPageMode.user = _registers.status().user;
 
         return true;
     }

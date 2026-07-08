@@ -4,7 +4,7 @@
 #include "../memory.hpp"
 #include "device.hpp"
 
-namespace k32 {
+namespace kemu {
 
 namespace dev {
 

@@ -3,7 +3,7 @@
 #include "../uuid.hpp"
 #include "../memory.hpp"
 
-namespace k32 {
+namespace kemu {
 
 namespace dev {
 

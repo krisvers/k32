@@ -14,7 +14,7 @@
 - `p0`-`p3`: 32-bit pointer registers (to be used by system code) [0000-0011]
 - `mmtable`: 32-bit pointer register (holds address of memory mapping table) [0100]
 - `inthandler`: 32-bit pointer register (holds address of interrupt handler which is exclusively system level) [0101]
-- `level`: level register (used for transitioning between system and user level, only modifiable from system level) [0110]
+- `sp6`: level and misc register (used for transitioning between system and user level, only modifiable from system level) [0110]
 
 ### 1.2.2. System-Level and User-Level
 
@@ -47,21 +47,21 @@
 
 ## 2.2. Paging Structures
 
-### 2.2.1. Table Entry
+### 2.2.1. Directory Entry - Table
 
-| range | significance                     |
-| ----- | -------------------------------- |
-| 0-32  | virtual address pointing to page |
+| range | significance                       |
+| ----- | ---------------------------------- |
+| 0-32  | physical address pointing to table |
 
-### 2.2.2. Page Entry
+### 2.2.2. Table Entry - Page
 | range | significance                             |
 | ----- | ---------------------------------------- |
-| 0-1   | read allowed                             |
-| 1-2   | write allowed                            |
-| 2-3   | execute allowed                          |
-| 3-4   | system permission only                   |
-| 4-11  | ...                                      |
-| 11-12 | page enabled                             |
+| 0-1   | page enabled                             |
+| 1-2   | read allowed                             |
+| 2-3   | write allowed                            |
+| 3-4   | execute allowed                          |
+| 4-5   | user level access allowed                |
+| 5-11  | ...                                      |
 | 12-32 | upper 20 bits of page's physical address |
 
 ## 2.3. Address Translation
@@ -398,11 +398,11 @@
 
 #### 3.4.4.1. 10101: `jr` - (A.1r.1imm16) - Jump the Instruction Pointer to the Value Stored in Register0 Plus/Minus Signed16
 
-- if condition? ip = register0 ± signed16
+- if condition? r31 = ip + 4; ip = register0 ± signed16
 
 #### 3.4.4.2. 10110: `jip` - (A.1imm20) - Jump the Instruction Pointer to the Instruction Pointer Plus/Minus Signed20
 
-- if condition? ip = ip ± signed20
+- if condition? r31 = ip + 4; ip = ip ± signed20
 
 ### 3.4.5. Special
 

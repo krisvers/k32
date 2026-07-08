@@ -1,12 +1,11 @@
 #pragma once
 
 #include <cstdint>
-#include <cctype>
 #include <sstream>
 #include <string>
 #include <stdexcept>
 
-namespace k32 {
+namespace kemu {
 
 class UUID {
 private:

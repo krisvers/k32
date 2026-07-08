@@ -1,12 +1,11 @@
 #pragma once
 
-#include <corecrt_wstring.h>
 #include <cstdint>
 #include <stdexcept>
 #include <map>
 #include <limits>
 
-namespace k32 {
+namespace kemu {
 
 using MemoryAddress = uint32_t;
 using MemoryExtent = uint32_t;
@@ -263,6 +262,21 @@ public:
 
         _regions[mappedAddress] = region;
         return true;
+    }
+
+    void unmapDevice(IMemoryDevice* memoryDevice) {
+        for (auto it = _regions.cbegin(); it != _regions.cend();) {
+            if (it->second.memoryDevice == memoryDevice) {
+                _regions.erase(it);
+                return;
+            }
+
+            ++it;
+        }
+    }
+
+    void clearMappedRegions() {
+        _regions.clear();
     }
 
     MemoryAddress getMappedAddress(IMemoryDevice const* memoryDevice) const {
